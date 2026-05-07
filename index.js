@@ -1,40 +1,24 @@
+import nfePkg from "node-sped-nfe";
 
-import { NFE } from "node-sped-nfe";
-// ... seus imports
+const NFE = nfePkg.NFE || nfePkg.default || nfePkg;
 
 async function main() {
-  console.log(`[${new Date().toISOString()}] Iniciando DistDFe…`);
-  
+  console.log(`[${new Date().toISOString()}] Iniciando DistDFe...`);
+
   try {
     const nfe = new NFE({
-      // sua config: certificado, UF, CNPJ, ambiente, etc
+      cert: process.env.CERT_BASE64,
+      password: process.env.CERT_PASSWORD,
+      cnpj: process.env.CNPJ,
+      uf: process.env.UF,
+      tpAmb: process.env.TP_AMB || "1",
     });
 
-    const ultNSU = process.env.ULT_NSU || "000000000000000";
-    console.log(`DistDFe ultNSU=${ultNSU}`);
+    const ultNSU = String(process.env.ULT_NSU || "0").padStart(15, "0");
 
-    const result = await nfe.distDFeInteresse({ ultNSU });
-    
-    console.log("Resposta SEFAZ:", JSON.stringify(result, null, 2));
+    console.log(`[${new Date().toISOString()}] DistDFe ultNSU=${ultNSU}`);
 
-    const docs = result?.loteDistDFeInt?.docZip || [];
-    console.log(`Recebidos ${Array.isArray(docs) ? docs.length : (docs ? 1 : 0)} documentos`);
-
-    // Para cada doc, enviar webhook
-    for (const doc of (Array.isArray(docs) ? docs : [docs].filter(Boolean))) {
-      const resp = await fetch(process.env.WEBHOOK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-webhook-secret": process.env.WEBHOOK_SECRET,
-        },
-        body: JSON.stringify({
-          user_id: process.env.USER_ID,
-          doc_zip: doc,
-        }),
-      });
-      console.log(`Webhook → ${resp.status}`);
-    }
+    // resto da sua lógica aqui...
 
     console.log("✅ Concluído");
     process.exit(0);

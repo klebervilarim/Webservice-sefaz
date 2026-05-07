@@ -10,6 +10,19 @@ const CERT_PASSWORD = process.env.CERT_PASSWORD;
 const ULT_NSU_INICIAL = process.env.ULT_NSU || "000000000000000";
 const MAX_CONSULTAS = Number(process.env.MAX_CONSULTAS || 20);
 
+const fs = require("fs");
+const path = "/tmp/cert.pfx";
+
+if (process.env.CERT_PFX_BASE64) {
+  fs.writeFileSync(path, Buffer.from(process.env.CERT_PFX_BASE64, "base64"));
+  process.env.CERT_PATH = path;
+  console.log("✅ Certificado decodificado:", fs.statSync(path).size, "bytes");
+} else {
+  console.error("❌ CERT_PFX_BASE64 não configurado");
+  process.exit(1);
+}
+
+
 if (!CNPJ || CNPJ.length !== 14) {
   console.error("❌ CNPJ inválido. Defina a variável CNPJ com 14 dígitos.");
   process.exit(1);

@@ -1,4 +1,4 @@
-import "dotenv/config";
+
 import { NFE } from "node-sped-nfe";
 // ... seus imports
 

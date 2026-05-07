@@ -1,4 +1,4 @@
-import "dotenv/config";
+
 import { Tools, docZip } from "node-sped-nfe";
 import fs from "node:fs";
 

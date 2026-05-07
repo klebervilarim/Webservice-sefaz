@@ -1,11 +1,11 @@
 FROM node:20-slim
 
-# Dependências de sistema exigidas pelo node-sped-nfe
+# Instala xmllint (libxml2-utils) — exigido pelo node-sped-nfe
 RUN apt-get update \
- && apt-get install -y libxml2-utils openssl ca-certificates \
+ && apt-get install -y --no-install-recommends libxml2-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/render/project/src
+WORKDIR /app
 
 COPY package*.json ./
 RUN npm install --omit=dev
@@ -13,3 +13,4 @@ RUN npm install --omit=dev
 COPY . .
 
 CMD ["node", "index.js"]
+

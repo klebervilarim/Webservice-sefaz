@@ -1,6 +1,5 @@
 FROM node:20-slim
 
-# Instala xmllint (libxml2-utils) — exigido pelo node-sped-nfe
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libxml2-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -8,9 +7,10 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY package*.json ./
+COPY patch-node-sped-nfe.js ./
+
 RUN npm install --omit=dev
 
 COPY . .
 
 CMD ["node", "index.js"]
-

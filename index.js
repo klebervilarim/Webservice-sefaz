@@ -4,12 +4,25 @@ import cron from 'node-cron';
 import { NFE } from 'node-sped-nfe';
 
 const {
-  CERT_PATH, CERT_PASSWORD, CNPJ, AMBIENTE = '1', UF = 'SP',
+  CERT_PATH, CERT_BASE64, CERT_PASSWORD, CNPJ, AMBIENTE = '1', UF = 'SP',
   WEBHOOK_URL, WEBHOOK_SECRET, USER_ID, CRON = '*/15 * * * *'
 } = process.env;
 
-if (!CERT_PATH || !CERT_PASSWORD || !CNPJ || !WEBHOOK_URL || !WEBHOOK_SECRET || !USER_ID) {
+if (!CERT_PASSWORD || !CNPJ || !WEBHOOK_URL || !WEBHOOK_SECRET || !USER_ID) {
   console.error('Faltam variaveis de ambiente. Veja .env.example');
+  process.exit(1);
+}
+
+// Carrega o certificado: prioriza CERT_BASE64 (env var), senão usa CERT_PATH (secret file)
+let pfxBuffer;
+if (CERT_BASE64) {
+  pfxBuffer = Buffer.from(CERT_BASE64, 'base64');
+  console.log('Certificado carregado via CERT_BASE64.');
+} else if (CERT_PATH && fs.existsSync(CERT_PATH)) {
+  pfxBuffer = fs.readFileSync(CERT_PATH);
+  console.log(`Certificado carregado de ${CERT_PATH}.`);
+} else {
+  console.error('Faltou o certificado: defina CERT_BASE64 (recomendado) ou CERT_PATH apontando para um secret file.');
   process.exit(1);
 }
 
@@ -20,7 +33,7 @@ const cfg = {
   estado: UF,
   CPFCNPJ: CNPJ,
   versao: '4.00',
-  pfx: fs.readFileSync(CERT_PATH),
+  pfx: pfxBuffer,
   senha: CERT_PASSWORD,
 };
 

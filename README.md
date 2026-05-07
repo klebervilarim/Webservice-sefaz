@@ -24,4 +24,3 @@ cp seu_certificado.pfx cert.pfx
 npm install
 npm start
 ```
-# Webservice-sefaz

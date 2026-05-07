@@ -1,103 +1,93 @@
-import 'dotenv/config';
-import fs from 'node:fs';
+import fs from 'fs';
 import cron from 'node-cron';
-import { NFE } from 'node-sped-nfe';
+import fetch from 'node-fetch';
+import { Tools, xml2json, docZip } from 'node-sped-nfe';
 
 const {
-  CERT_PATH, CERT_BASE64, CERT_PASSWORD, CNPJ, AMBIENTE = '1', UF = 'SP',
-  WEBHOOK_URL, WEBHOOK_SECRET, USER_ID, CRON = '*/15 * * * *'
+  CERT_BASE64,
+  CERT_PATH,
+  CERT_PASSWORD,
+  CNPJ,
+  UF = 'SP',
+  TP_AMB = '1', // 1=produção, 2=homologação
+  USER_ID,
+  WEBHOOK_URL,
+  WEBHOOK_SECRET,
+  CRON = '*/15 * * * *'
 } = process.env;
 
-if (!CERT_PASSWORD || !CNPJ || !WEBHOOK_URL || !WEBHOOK_SECRET || !USER_ID) {
-  console.error('Faltam variaveis de ambiente. Veja .env.example');
+if (!CERT_PASSWORD || !CNPJ || !USER_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
+  console.error('Faltam variáveis de ambiente obrigatórias.');
   process.exit(1);
 }
 
-// Carrega o certificado: prioriza CERT_BASE64 (env var), senão usa CERT_PATH (secret file)
 let pfxBuffer;
 if (CERT_BASE64) {
   pfxBuffer = Buffer.from(CERT_BASE64, 'base64');
-  console.log('Certificado carregado via CERT_BASE64.');
 } else if (CERT_PATH && fs.existsSync(CERT_PATH)) {
   pfxBuffer = fs.readFileSync(CERT_PATH);
-  console.log(`Certificado carregado de ${CERT_PATH}.`);
 } else {
-  console.error('Faltou o certificado: defina CERT_BASE64 (recomendado) ou CERT_PATH apontando para um secret file.');
+  console.error('Defina CERT_BASE64 ou CERT_PATH.');
   process.exit(1);
 }
 
-let ultimoNSU = '0';
+const tools = new Tools(
+  { mod: '55', UF, tpAmb: Number(TP_AMB), CNPJ: CNPJ.replace(/\D/g, ''), versao: '4.00', timeout: 60 },
+  { pfx: pfxBuffer, senha: CERT_PASSWORD }
+);
 
-const cfg = {
-  ambiente: Number(AMBIENTE),
-  estado: UF,
-  CPFCNPJ: CNPJ,
-  versao: '4.00',
-  pfx: pfxBuffer,
-  senha: CERT_PASSWORD,
-};
+let ultNSU = process.env.START_NSU || '000000000000000';
 
-function parseChave(xml) {
-  const m = xml.match(/Id="NFe(\d{44})"/);
-  return m ? m[1] : null;
-}
-function tag(xml, t) {
-  const m = xml.match(new RegExp(`<${t}>([^<]+)</${t}>`));
-  return m ? m[1] : '';
-}
-
-async function consultar() {
-  console.log(`[${new Date().toISOString()}] Consultando SEFAZ NSU=${ultimoNSU}...`);
+async function processar() {
+  console.log(`[${new Date().toISOString()}] DistDFe ultNSU=${ultNSU}`);
   try {
-    const nfe = new NFE(cfg);
-    const resp = await nfe.NFEDistribuicaoDFe({ ultNSU: ultimoNSU });
-    const docs = resp?.loteDistDFeInt?.docZip ?? [];
-    const lista = Array.isArray(docs) ? docs : [docs];
-
+    const xmlResp = await tools.sefazDistDFe({ ultNSU });
+    const json = await xml2json(xmlResp);
+    const ret = json?.['soap:Envelope']?.['soap:Body']?.['nfeDistDFeInteresseResponse']?.['nfeDistDFeInteresseResult']?.['retDistDFeInt'];
+    if (!ret) { console.log('Sem retorno'); return; }
+    const cStat = ret.cStat;
+    const novoUltNSU = ret.ultNSU || ultNSU;
+    console.log('cStat=', cStat, 'maxNSU=', ret.maxNSU, 'ultNSU=', novoUltNSU);
+    let docs = ret?.loteDistDFe?.docZip || [];
+    if (!Array.isArray(docs)) docs = [docs];
     const notas = [];
-    for (const d of lista) {
-      const xml = Buffer.from(d._ ?? d, 'base64').toString('utf8');
-      if (!xml.includes('<NFe')) continue;
-      const chave = parseChave(xml);
-      if (!chave) continue;
-      notas.push({
-        user_id: USER_ID,
-        chave,
-        numero: tag(xml, 'nNF'),
-        serie: tag(xml, 'serie') || '1',
-        emitente_nome: tag(xml, 'xNome'),
-        emitente_cnpj: tag(xml, 'CNPJ'),
-        destinatario_cnpj: CNPJ,
-        data_emissao: tag(xml, 'dhEmi') || new Date().toISOString(),
-        valor: Number(tag(xml, 'vNF') || 0),
-        status: 'Pendente',
-        xml,
-        ambiente: AMBIENTE === '1' ? 'producao' : 'homologacao',
+    for (const dz of docs) {
+      try {
+        const xml = await docZip(dz['#text'] || dz);
+        const j = await xml2json(xml);
+        const inf = j?.nfeProc?.NFe?.infNFe || j?.NFe?.infNFe || j?.resNFe;
+        if (!inf) continue;
+        const chave = (inf['@Id'] || '').replace(/^NFe/, '') || inf.chNFe;
+        notas.push({
+          user_id: USER_ID,
+          chave,
+          numero: inf?.ide?.nNF || '',
+          serie: String(inf?.ide?.serie || '1'),
+          emitente_nome: inf?.emit?.xNome || inf?.xNome || '',
+          emitente_cnpj: inf?.emit?.CNPJ || inf?.CNPJ || '',
+          destinatario_cnpj: inf?.dest?.CNPJ || CNPJ.replace(/\D/g, ''),
+          data_emissao: inf?.ide?.dhEmi || inf?.dhEmi || new Date().toISOString(),
+          valor: Number(inf?.total?.ICMSTot?.vNF || inf?.vNF || 0),
+          status: 'Pendente',
+          xml,
+          ambiente: TP_AMB === '1' ? 'producao' : 'homologacao'
+        });
+      } catch (e) { console.error('docZip err', e.message); }
+    }
+    if (notas.length) {
+      const r = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': WEBHOOK_SECRET },
+        body: JSON.stringify({ notas })
       });
+      console.log('webhook', r.status, await r.text());
     }
-
-    if (resp?.ultNSU) ultimoNSU = resp.ultNSU;
-
-    if (notas.length === 0) {
-      console.log('Nenhuma nota nova.');
-      return;
-    }
-
-    const r = await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': WEBHOOK_SECRET },
-      body: JSON.stringify({ notas }),
-    });
-    console.log(`Enviadas ${notas.length} notas -> webhook status ${r.status}`);
+    ultNSU = novoUltNSU;
   } catch (e) {
-    console.error('Erro ao consultar SEFAZ:', e.message);
+    console.error('erro', e?.message || e);
   }
 }
 
-console.log('Worker SEFAZ iniciado. Cron:', CRON);
-cron.schedule(CRON, consultar);
-consultar();
-
-// keep-alive http para Render Web Service free tier
-import http from 'node:http';
-http.createServer((_, res) => res.end('ok')).listen(process.env.PORT || 3000);
+processar();
+cron.schedule(CRON, processar);
+console.log('Worker iniciado. CRON=', CRON);

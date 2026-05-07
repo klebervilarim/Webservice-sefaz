@@ -2,27 +2,27 @@
 import { Tools } from "node-sped-nfe";
 import fs from "fs";
 
+// 1) Decodifica o certificado a partir do Base64 ANTES de qualquer leitura
+if (process.env.CERT_PFX_BASE64) {
+  const tmpPath = "/tmp/cert.pfx";
+  fs.writeFileSync(tmpPath, Buffer.from(process.env.CERT_PFX_BASE64, "base64"));
+  process.env.CERT_PATH = tmpPath;
+  console.log("✅ Certificado decodificado:", fs.statSync(tmpPath).size, "bytes");
+} else if (!process.env.CERT_PATH) {
+  console.error("❌ CERT_PFX_BASE64 não configurado (e CERT_PATH ausente)");
+  process.exit(1);
+}
+
+// 2) Variáveis de ambiente (lidas DEPOIS do decode)
 const CNPJ = String(process.env.CNPJ || "").replace(/\D/g, "");
 const UF = process.env.UF;
 const TP_AMB = Number(process.env.TP_AMB || 1);
-const CERT_PATH = process.env.CERT_PATH || "./cert.pfx";
+const CERT_PATH = process.env.CERT_PATH;
 const CERT_PASSWORD = process.env.CERT_PASSWORD;
 const ULT_NSU_INICIAL = process.env.ULT_NSU || "000000000000000";
 const MAX_CONSULTAS = Number(process.env.MAX_CONSULTAS || 20);
 
-const fs = require("fs");
-const path = "/tmp/cert.pfx";
-
-if (process.env.CERT_PFX_BASE64) {
-  fs.writeFileSync(path, Buffer.from(process.env.CERT_PFX_BASE64, "base64"));
-  process.env.CERT_PATH = path;
-  console.log("✅ Certificado decodificado:", fs.statSync(path).size, "bytes");
-} else {
-  console.error("❌ CERT_PFX_BASE64 não configurado");
-  process.exit(1);
-}
-
-
+// 3) Validações
 if (!CNPJ || CNPJ.length !== 14) {
   console.error("❌ CNPJ inválido. Defina a variável CNPJ com 14 dígitos.");
   process.exit(1);
@@ -87,7 +87,6 @@ async function main() {
       // TODO: processar/salvar docs aqui (descompactar gzip + base64).
     }
 
-    // 137 = Nenhum documento localizado / 138 = Documento localizado
     if (cStat === "137" || cStat === "656" || !maxNSU || novoUltNSU >= maxNSU) {
       console.log("✅ Fim das consultas.");
       break;

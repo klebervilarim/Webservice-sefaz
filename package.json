@@ -1,7 +1,10 @@
 {
-  "name": "distdfe-cron",
-  "version": "1.0.0",
   "type": "module",
-  "scripts": { "start": "node index.js" },
-  "dependencies": { "node-sped-nfe": "^1.0.0" }
+  "scripts": {
+    "postinstall": "node patch-node-sped-nfe.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-sped-nfe": "^1.2.52"
+  }
 }

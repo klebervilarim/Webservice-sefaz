@@ -1,0 +1,16 @@
+{
+  "name": "sefaz-distdfe-worker",
+  "version": "1.0.0",
+  "description": "Microservico que consulta DistDFe da SEFAZ e envia notas para o webhook do app Lovable",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-sped-nfe": "^2.0.10",
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.4.5"
+  },
+  "engines": { "node": ">=18" }
+}

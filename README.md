@@ -7,7 +7,7 @@ A tela `/fiscal/recebidas` no Lovable consome `GET /notas/:cnpj?ambiente=produca
 
 ## 1. Subir no Railway
 
-1. Crie um novo projeto no Railway → **Deploy from GitHub** (ou faça upload desta pasta como repo).
+1. Crie  um novo projeto no Railway → **Deploy from GitHub** (ou faça upload desta pasta como repo).
 2. Em **Variables**, adicione:
 
 | Variável | Valor |

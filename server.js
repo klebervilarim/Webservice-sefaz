@@ -35,27 +35,35 @@ app.post("/buscar-notas", async (req, res) => {
     }
 
     // ========================================
-    // CERTIFICADO VARIAVEIS RAILWAY
+    // CERTIFICADO BASE64 RAILWAY
     // ========================================
 
-    const cert = process.env.CERT_PEM;
-
-    const key = process.env.CERT_KEY;
-
-    if (!cert) {
+    if (!process.env.CERT_BASE64) {
       return res.status(500).json({
-        erro: "CERT_PEM não configurado"
+        erro: "CERT_BASE64 não configurado"
       });
     }
 
-    if (!key) {
+    if (!process.env.CERT_KEY_BASE64) {
       return res.status(500).json({
-        erro: "CERT_KEY não configurado"
+        erro: "CERT_KEY_BASE64 não configurado"
       });
     }
 
-    console.log("CERT_PEM OK");
-    console.log("CERT_KEY OK");
+    // CERTIFICADO PEM
+    const cert = Buffer.from(
+      process.env.CERT_BASE64,
+      "base64"
+    ).toString("utf8");
+
+    // CHAVE PRIVADA
+    const key = Buffer.from(
+      process.env.CERT_KEY_BASE64,
+      "base64"
+    ).toString("utf8");
+
+    console.log("CERTIFICADO OK");
+    console.log("KEY OK");
 
     // ========================================
     // HTTPS AGENT
@@ -202,7 +210,7 @@ app.post("/buscar-notas", async (req, res) => {
     }
 
     // ========================================
-    // RESPOSTA
+    // RESPOSTA FINAL
     // ========================================
 
     return res.json({

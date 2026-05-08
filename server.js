@@ -10,9 +10,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ========================================
+// HEALTHCHECK
+// ========================================
+
 app.get("/", (req, res) => {
   res.send("API NF-e ONLINE");
 });
+
+// ========================================
+// BUSCAR NOTAS
+// ========================================
 
 app.post("/buscar-notas", async (req, res) => {
 
@@ -26,24 +34,45 @@ app.post("/buscar-notas", async (req, res) => {
       });
     }
 
-    // CERTIFICADO PEM
-    const cert = process.env.CERT_PEM
-      .replace(/\\n/g, "\n");
+    // ========================================
+    // CERTIFICADO VARIAVEIS RAILWAY
+    // ========================================
 
-    // PRIVATE KEY
-    const key = process.env.CERT_KEY
-      .replace(/\\n/g, "\n");
+    const cert = process.env.CERT_PEM;
 
+    const key = process.env.CERT_KEY;
+
+    if (!cert) {
+      return res.status(500).json({
+        erro: "CERT_PEM não configurado"
+      });
+    }
+
+    if (!key) {
+      return res.status(500).json({
+        erro: "CERT_KEY não configurado"
+      });
+    }
+
+    console.log("CERT_PEM OK");
+    console.log("CERT_KEY OK");
+
+    // ========================================
     // HTTPS AGENT
+    // ========================================
+
     const agent = new https.Agent({
       cert,
       key,
       rejectUnauthorized: false,
     });
 
-    console.log("HTTPS PEM OK");
+    console.log("HTTPS AGENT OK");
 
+    // ========================================
     // SOAP XML
+    // ========================================
+
     const soap = `
     <soapenv:Envelope
       xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -82,7 +111,12 @@ app.post("/buscar-notas", async (req, res) => {
     </soapenv:Envelope>
     `;
 
+    console.log("Consultando SEFAZ...");
+
+    // ========================================
     // CHAMADA SEFAZ
+    // ========================================
+
     const response = await axios.post(
       "https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx",
       soap,
@@ -96,6 +130,12 @@ app.post("/buscar-notas", async (req, res) => {
         timeout: 30000,
       }
     );
+
+    console.log("SEFAZ respondeu");
+
+    // ========================================
+    // XML → JSON
+    // ========================================
 
     const parser = new xml2js.Parser({
       explicitArray: false
@@ -112,6 +152,20 @@ app.post("/buscar-notas", async (req, res) => {
       ["nfeDistDFeInteresseResult"]
       ["retDistDFeInt"];
 
+    // ========================================
+    // STATUS
+    // ========================================
+
+    const cStat = ret.cStat;
+    const xMotivo = ret.xMotivo;
+
+    console.log("STATUS:", cStat);
+    console.log("MOTIVO:", xMotivo);
+
+    // ========================================
+    // DOCUMENTOS
+    // ========================================
+
     let notas = [];
 
     const lote = ret.loteDistDFeInt;
@@ -124,25 +178,40 @@ app.post("/buscar-notas", async (req, res) => {
 
       for (const doc of docs) {
 
-        const xml =
-          zlib.gunzipSync(
-            Buffer.from(doc._, "base64")
-          ).toString("utf8");
+        try {
 
-        notas.push({
-          nsu: doc.$.NSU,
-          schema: doc.$.schema,
-          xml
-        });
+          const xml =
+            zlib.gunzipSync(
+              Buffer.from(doc._, "base64")
+            ).toString("utf8");
+
+          notas.push({
+            nsu: doc.$.NSU,
+            schema: doc.$.schema,
+            xml
+          });
+
+        } catch (e) {
+
+          console.error(
+            "Erro descompactar XML",
+            e.message
+          );
+        }
       }
     }
 
+    // ========================================
+    // RESPOSTA
+    // ========================================
+
     return res.json({
       sucesso: true,
-      cStat: ret.cStat,
-      xMotivo: ret.xMotivo,
+      cStat,
+      xMotivo,
       ultNSU: ret.ultNSU,
       maxNSU: ret.maxNSU,
+      quantidadeNotas: notas.length,
       notas
     });
 
@@ -152,11 +221,18 @@ app.post("/buscar-notas", async (req, res) => {
 
     return res.status(500).json({
       erro: error.message,
-      detalhes: error.response?.data || null
+      detalhes:
+        error.response?.data || null
     });
   }
 });
 
-app.listen(8080, () => {
-  console.log("Servidor rodando 8080");
+// ========================================
+// START SERVER
+// ========================================
+
+const PORT = process.env.PORT || 8080;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor rodando ${PORT}`);
 });

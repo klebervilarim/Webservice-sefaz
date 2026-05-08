@@ -5,37 +5,51 @@
 
 import express from "express";
 import cors from "cors";
-import fs from "fs";
-import path from "path";
 import zlib from "zlib";
 import { parseStringPromise } from "xml2js";
 import { createClient } from "@supabase/supabase-js";
 import { Tools } from "node-sped-nfe";
 
-// ---------- Config ----------
+// ---------- Config (todas vindas das env vars do Railway) ----------
 const PORT = process.env.PORT || 3000;
 const UF = process.env.UF || "SP";
-const CERT_PATH = process.env.CERT_PATH || "/etc/secrets/cert.pfx";
+const CNPJ_DEFAULT = String(process.env.CNPJ || "").replace(/\D/g, "");
+const CERT_BASE64 = process.env.CERT_BASE64;
 const CERT_PASSWORD = process.env.CERT_PASSWORD;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const OWNER_USER_ID = process.env.OWNER_USER_ID; // user_id que vai "dono" das notas inseridas
+const OWNER_USER_ID = process.env.OWNER_USER_ID;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET; // protege os endpoints
+const WEBHOOK_URL = process.env.WEBHOOK_URL;       // opcional: notifica novos docs
 const MAX_CONSULTAS = Number(process.env.MAX_CONSULTAS || 20);
 
+if (!CERT_BASE64) console.warn("⚠️ CERT_BASE64 não definido");
 if (!CERT_PASSWORD) console.warn("⚠️ CERT_PASSWORD não definido");
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) console.warn("⚠️ SUPABASE_URL/SERVICE_ROLE_KEY não definidos");
-if (!OWNER_USER_ID) console.warn("⚠️ OWNER_USER_ID não definido — notas serão gravadas sem dono e RLS bloqueará leitura");
+if (!OWNER_USER_ID) console.warn("⚠️ OWNER_USER_ID não definido — RLS bloqueará leitura");
 
 const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
   : null;
 
-// ---------- Helpers ----------
+// ---------- Cert (base64 → Buffer) ----------
+let _pfxBuffer = null;
 function readCert() {
-  if (!fs.existsSync(CERT_PATH)) throw new Error(`Certificado não encontrado em ${CERT_PATH}`);
-  return fs.readFileSync(CERT_PATH);
+  if (_pfxBuffer) return _pfxBuffer;
+  if (!CERT_BASE64) throw new Error("CERT_BASE64 não definido");
+  _pfxBuffer = Buffer.from(CERT_BASE64.replace(/\s+/g, ""), "base64");
+  return _pfxBuffer;
 }
 
+// ---------- Auth ----------
+function checkAuth(req) {
+  if (!WEBHOOK_SECRET) return true; // sem secret configurado, aberto
+  const h = req.headers["authorization"] || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : (req.query.token || "");
+  return token === WEBHOOK_SECRET;
+}
+
+// ---------- Helpers ----------
 async function unzipDoc(docZipBase64) {
   const buf = Buffer.from(docZipBase64, "base64");
   return new Promise((resolve, reject) => {
@@ -51,7 +65,6 @@ function pick(o, ...keys) {
 }
 
 async function parseResNFe(xmlStr) {
-  // resNFe = resumo de NF-e destinada
   const j = await parseStringPromise(xmlStr, { explicitArray: false, ignoreAttrs: false });
   const r = j.resNFe || j;
   return {
@@ -102,11 +115,25 @@ async function upsertNota(cnpjDest, ambiente, doc) {
     xml: doc.xml || null,
     ambiente,
   };
-  const { error } = await supabase
-    .from("notas_recebidas")
-    .upsert(row, { onConflict: "chave" });
+  const { error } = await supabase.from("notas_recebidas").upsert(row, { onConflict: "chave" });
   if (error) console.error("upsert erro:", error.message);
   return { ok: !error };
+}
+
+async function notifyWebhook(payload) {
+  if (!WEBHOOK_URL) return;
+  try {
+    await fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(WEBHOOK_SECRET ? { "x-webhook-secret": WEBHOOK_SECRET } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    console.warn("webhook falhou:", e.message);
+  }
 }
 
 // ---------- SEFAZ DistDFe loop ----------
@@ -162,6 +189,7 @@ async function distDFe({ cnpj, ambiente }) {
     ultNSU = String(novoUltNSU).padStart(15, "0");
   }
 
+  if (docs.length) await notifyWebhook({ cnpj, ambiente, total: docs.length });
   return { total: docs.length, docs };
 }
 
@@ -173,20 +201,30 @@ app.use(express.json());
 app.get("/", (_req, res) => res.json({ ok: true, service: "nfe-distdfe" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-app.get("/notas/:cnpj", async (req, res) => {
+async function handleNotas(req, res) {
   try {
-    const cnpj = String(req.params.cnpj).replace(/\D/g, "");
+    if (!checkAuth(req)) return res.status(401).json({ error: "unauthorized" });
+    const cnpjParam = String(req.params.cnpj || CNPJ_DEFAULT).replace(/\D/g, "");
     const ambiente = req.query.ambiente === "homologacao" ? "homologacao" : "producao";
-    if (cnpj.length !== 14) return res.status(400).json({ error: "CNPJ inválido" });
+    if (cnpjParam.length !== 14) return res.status(400).json({ error: "CNPJ inválido" });
 
-    const result = await distDFe({ cnpj, ambiente });
-    res.json({ cnpj, ambiente, total: result.total, notas: result.docs.map(d => ({
-      chave: d.chave, numero: d.numero, emitente: d.nomeEmit, valor: d.valor, dataEmissao: d.dataEmissao,
-    })) });
+    const result = await distDFe({ cnpj: cnpjParam, ambiente });
+    res.json({
+      cnpj: cnpjParam,
+      ambiente,
+      total: result.total,
+      notas: result.docs.map(d => ({
+        chave: d.chave, numero: d.numero, emitente: d.nomeEmit, valor: d.valor, dataEmissao: d.dataEmissao,
+      })),
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e?.message || String(e) });
   }
-});
+}
 
-app.listen(PORT, () => console.log(`✅ Backend NF-e on :${PORT}`));
+app.get("/notas/:cnpj", handleNotas);
+// rota sem cnpj usa o CNPJ default da env
+app.get("/notas", (req, res) => handleNotas({ ...req, params: { cnpj: CNPJ_DEFAULT } }, res));
+
+app.listen(PORT, () => console.log(`✅ Backend NF-e on :${PORT} (UF=${UF}, CNPJ default=${CNPJ_DEFAULT || "n/a"})`));

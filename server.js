@@ -1,14 +1,13 @@
 const express = require("express");
 const axios = require("axios");
 const https = require("https");
-const xml2js = require("xml2js");
 const cors = require("cors");
+const xml2js = require("xml2js");
 require("dotenv").config();
 
 const app = express();
 
 app.use(cors());
-
 app.use(express.json());
 
 app.get("/", (req, res) => {
@@ -21,17 +20,26 @@ app.post("/buscar-notas", async (req, res) => {
 
     const { cnpj, ultNSU } = req.body;
 
+    if (!cnpj) {
+      return res.status(400).json({
+        erro: "CNPJ obrigatório"
+      });
+    }
+
+    // CERTIFICADO BASE64
     const certificado = Buffer.from(
       process.env.CERT_BASE64,
       "base64"
     );
 
+    // HTTPS AGENT COM CERTIFICADO DIGITAL
     const agent = new https.Agent({
       pfx: certificado,
       passphrase: process.env.CERT_PASS,
       rejectUnauthorized: false,
     });
 
+    // XML SOAP SEFAZ
     const soap = `
     <soapenv:Envelope
       xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -70,6 +78,7 @@ app.post("/buscar-notas", async (req, res) => {
     </soapenv:Envelope>
     `;
 
+    // CHAMADA WEBSERVICE SEFAZ
     const response = await axios.post(
       "https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx",
       soap,
@@ -84,6 +93,7 @@ app.post("/buscar-notas", async (req, res) => {
       }
     );
 
+    // XML → JSON
     const parser = new xml2js.Parser({
       explicitArray: false
     });
@@ -96,7 +106,9 @@ app.post("/buscar-notas", async (req, res) => {
 
   } catch (error) {
 
-    console.error(error.response?.data || error.message);
+    console.error(
+      error.response?.data || error.message
+    );
 
     return res.status(500).json({
       erro: error.message,
@@ -108,5 +120,5 @@ app.post("/buscar-notas", async (req, res) => {
 const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });

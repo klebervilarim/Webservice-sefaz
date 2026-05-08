@@ -8,9 +8,9 @@ app.get("/", (req, res) => {
   res.send("API ONLINE");
 });
 
-app.post("/buscar-notas", async (req, res) => {
+app.post("/buscar-notas", (req, res) => {
 
-  console.log(req.body);
+  console.log("BODY:", req.body);
 
   return res.json({
     sucesso: true,

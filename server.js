@@ -10,9 +10,11 @@ app.get("/", (req, res) => {
 
 app.post("/buscar-notas", async (req, res) => {
 
+  console.log(req.body);
+
   return res.json({
     sucesso: true,
-    body: req.body
+    recebido: req.body
   });
 
 });
@@ -20,5 +22,5 @@ app.post("/buscar-notas", async (req, res) => {
 const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
